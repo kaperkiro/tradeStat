@@ -246,20 +246,20 @@ if __name__ == "__main__":
     percent_hold = []
 
     index_tickers = [
-        "AMD",
+        "^GSPC",  # S&P 500
     ]
 
     for ticker in index_tickers:
         print(ticker)
         startCapital = 0
         monthlyInvesting = 100
-        startDate = "2000-10-10"
-        endDate = "2025-12-05"
-        interval = "1D"
+        startDate = "2024-10-10"
+        endDate = "2025-12-16"
+        interval = "1h"
         tradeInstance = TradeInstance(
             startDate, endDate, interval, startCapital, monthlyInvesting, ticker
         )
-        tradeStrat = MACDTradeStrat(2)
+        tradeStrat = RSITradeStrat(40, 80)
         main(tradeInstance, tradeStrat)
         n_months = count_months(startDate, endDate)
         total_contrib = startCapital + n_months * monthlyInvesting
