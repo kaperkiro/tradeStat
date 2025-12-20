@@ -246,14 +246,14 @@ if __name__ == "__main__":
     percent_hold = []
 
     index_tickers = [
-        "^GSPC",  # S&P 500
+        "^WIG20",
     ]
 
     for ticker in index_tickers:
         print(ticker)
         startCapital = 0
         monthlyInvesting = 100
-        startDate = "2024-10-10"
+        startDate = "2025-10-10"
         endDate = "2025-12-16"
         interval = "1h"
         tradeInstance = TradeInstance(
