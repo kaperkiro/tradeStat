@@ -2,8 +2,28 @@ from datetime import datetime
 import pandas as pd
 import yfinance as yf
 import indicators
-import graphs
 import macd_functions as mf
+
+
+class StrategyBase:
+    name = "UnnamedStrategy"
+
+    def on_start(self, ctx, first_ts, first_price):
+        """
+        Optional: called once at the beginning.
+        """
+        pass
+
+    def on_bar(self, ctx, ts, row):
+        """
+        Called on every candle/bar.
+
+        Must return:
+        - "BUY"
+        - "SELL"
+        - None   (hold)
+        """
+        raise NotImplementedError
 
 
 class RSITradeStrat:
@@ -242,6 +262,8 @@ def average(values):
 
 
 if __name__ == "__main__":
+    import graphs
+
     percent_trade = []
     percent_hold = []
 

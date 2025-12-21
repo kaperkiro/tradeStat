@@ -1,0 +1,21 @@
+# Environments and secrets
+.env
+.venv/
+venv/
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# IDE/editor settings
+.vscode/
+.idea/
+
+# OS cruft
+.DS_Store
+
+# Generated artifacts
+generated_strategies/
