@@ -3,18 +3,13 @@ import pandas as pd
 import yfinance as yf
 import indicators
 import macd_functions as mf
+import AIStrategy as AI
 
 
 class StrategyBase:
     name = "UnnamedStrategy"
 
-    def on_start(self, ctx, first_ts, first_price):
-        """
-        Optional: called once at the beginning.
-        """
-        pass
-
-    def on_bar(self, ctx, ts, row):
+    def on_bar(self, cash, shares, ts, row):
         """
         Called on every candle/bar.
 
@@ -44,6 +39,13 @@ class MACDTradeStrat:
 
     def __init__(self, macdStrat):
         self.macdStrat = macdStrat
+
+
+class AITradingStrat:
+    num = 3
+
+    def __init__(self, SB: StrategyBase):
+        self.SB = SB
 
 
 class TradeInstance:
@@ -81,13 +83,8 @@ class TradeInstance:
         self.sellData.clear()
 
 
-def main(TI: TradeInstance, tradingStrat):
-    td = getHistoData(
-        TI.start,
-        TI.end,
-        TI.index,
-        TI.interval,
-    )
+def main(TI: TradeInstance, tradingStrat, td):
+
     indicators.validate_month_coverage(td, TI.start, TI.end)
 
     buyAndHoldStrategy(TI, td)
@@ -98,6 +95,47 @@ def main(TI: TradeInstance, tradingStrat):
     elif tradingStrat.num == 2:
         td = indicators.calculate_macd(td)
         tradeMACDStrategy(TI, tradingStrat, td)
+    elif tradingStrat.num == 3:
+        print("got into tradeAI")
+        td = indicators.calculateRsi(td)
+        td = indicators.calculate_macd(td)
+        tradeAIStrategy(TI, tradingStrat.SB, td)
+
+    return
+
+
+def tradeAIStrategy(TI: TradeInstance, SB: StrategyBase, td):
+    cash = TI.startCapital
+    shares = 0.0
+
+    td = td.copy() if td is not None else None
+    td = td.sort_index()
+
+    first_ts = td.index.min()
+    current_month = first_ts.month
+
+    for ts, interval in td.iterrows():
+        price = interval["Close"]
+
+        # Add monthly contribution once per month (at the first bar of a new month).
+        if ts.month != current_month and TI.monthlyInvesting != 0:
+            cash += TI.monthlyInvesting
+            current_month = ts.month
+
+        action = SB.on_bar(cash, shares, ts, interval)
+        if action is not None:
+            if action == "BUY":
+                equity = cash + shares * price
+                shares = TI.buyShares(equity, price)
+                cash = 0
+                TI.buyData.append((ts, price))
+            elif action == "SELL":
+                cash += shares * price
+                shares = 0
+                TI.sellData.append((ts, price))
+        equity = cash + shares * price
+        TI.priceDataTrade.append((ts, equity))
+        TI.endValueTrade = equity
 
     return
 
@@ -203,12 +241,18 @@ def tradeRsiStrategy(TI, tradingStrat, td=None):
     shares = 0.0
     td = td.copy() if td is not None else None
     td = td.sort_index()
+
+    # Skip bars where RSI hasn't been computed yet (first ~14 periods).
+    td = td[td["RSI14"].notna()]
+    if td.empty:
+        raise ValueError("Not enough data to trade on RSI.")
+
     first_ts = td.index.min()
     current_month = first_ts.month
-    first_price = td.iloc[0]["Close"]
-    shares = TI.buyShares(cash, first_price)
-    cash = 0
-    TI.buyData.append((first_ts, first_price))
+    # first_price = td.iloc[0]["Close"]
+    # shares = TI.buyShares(cash, first_price)
+    # cash = 0
+    # TI.buyData.append((first_ts, first_price))
 
     # Only add priceSeries here if the hold strategy hasn't populated it yet.
     add_price_series = not TI.priceSeries
@@ -268,35 +312,65 @@ if __name__ == "__main__":
     percent_hold = []
 
     index_tickers = [
-        "^WIG20",
+        "AMD",
     ]
-
-    for ticker in index_tickers:
-        print(ticker)
-        startCapital = 0
-        monthlyInvesting = 100
-        startDate = "2025-10-10"
-        endDate = "2025-12-16"
-        interval = "1h"
-        tradeInstance = TradeInstance(
-            startDate, endDate, interval, startCapital, monthlyInvesting, ticker
-        )
-        tradeStrat = RSITradeStrat(40, 80)
-        main(tradeInstance, tradeStrat)
-        n_months = count_months(startDate, endDate)
-        total_contrib = startCapital + n_months * monthlyInvesting
-        percent_trade.append(
-            round(((tradeInstance.endValueTrade / total_contrib) * 100), 2)
-        )
-        percent_hold.append(
-            round(((tradeInstance.endValueHold / total_contrib) * 100), 2)
-        )
-        graphs.graphPrice(tradeInstance)
-        tradeInstance.reset()
-
+    prompt = input("Enter your trading strategy description:")
+    code = AI.generateTradingStrat(prompt)
+    strategy: StrategyBase = AI.load_strategy_from_code(code)
+    startCapital = 0
+    monthlyInvesting = 100
+    startDate = "2020-10-10"
+    endDate = "2025-12-16"
+    interval = "1D"
+    ticker = "AMD"
+    tradeInstance = TradeInstance(
+        startDate, endDate, interval, startCapital, monthlyInvesting, ticker
+    )
+    tradeStrat = AITradingStrat(strategy)
+    td = getHistoData(startDate, endDate, ticker, interval)
+    main(tradeInstance, tradeStrat, td)
+    n_months = count_months(startDate, endDate)
+    total_contrib = startCapital + n_months * monthlyInvesting
+    percent_trade.append(
+        round(((tradeInstance.endValueTrade / total_contrib) * 100), 2)
+    )
+    percent_hold.append(round(((tradeInstance.endValueHold / total_contrib) * 100), 2))
+    graphs.graphPrice(tradeInstance)
     print(
         f"Average gain for trading strategy: {average(percent_trade)} \nAverage capital gain for holding: {average(percent_hold)}"
     )
+
+    # for ticker in index_tickers:
+    #     startCapital = 0
+    #     monthlyInvesting = 100
+    #     startDate = "2025-10-10"
+    #     endDate = "2025-12-16"
+    #     interval = "1h"
+    #     tradeInstance = TradeInstance(
+    #         startDate, endDate, interval, startCapital, monthlyInvesting, ticker
+    #     )
+    #     tradeStrat = RSITradeStrat(40, 80)
+    #     td = getHistoData(
+    #         tradeInstance.start,
+    #         tradeInstance.end,
+    #         tradeInstance.index,
+    #         tradeInstance.interval,
+    #     )
+    #     main(tradeInstance, tradeStrat)
+    #     n_months = count_months(startDate, endDate)
+    #     total_contrib = startCapital + n_months * monthlyInvesting
+    #     percent_trade.append(
+    #         round(((tradeInstance.endValueTrade / total_contrib) * 100), 2)
+    #     )
+    #     percent_hold.append(
+    #         round(((tradeInstance.endValueHold / total_contrib) * 100), 2)
+    #     )
+    #     graphs.graphPrice(tradeInstance)
+    #     tradeInstance.reset()
+
+    # print(
+    #     f"Average gain for trading strategy: {average(percent_trade)} \nAverage capital gain for holding: {average(percent_hold)}"
+    # )
 
 
 TICKERS = [  # US Indexes
