@@ -1,86 +1,19 @@
 from datetime import datetime
+import sys
 import pandas as pd
 import yfinance as yf
 import indicators
 import macd_functions as mf
-import AIStrategy as AI
 
-
-class StrategyBase:
-    name = "UnnamedStrategy"
-
-    def on_bar(self, cash, shares, ts, row):
-        """
-        Called on every candle/bar.
-
-        Must return:
-        - "BUY"
-        - "SELL"
-        - None   (hold)
-        """
-        raise NotImplementedError
-
-
-class RSITradeStrat:
-    num = 1
-
-    def __init__(self, lowerBound, upperBound):
-        self.lowerBound = lowerBound
-        self.upperBound = upperBound
-
-
-class MACDTradeStrat:
-    num = 2
-
-    # macdStrat 1: Crossing of MACD and the signal line
-    # macdStrat 2: Crossing the zero line
-    # macdStrat 3: Overbought and oversold levels
-    # macdStrat 4: Divergence in price and MACD
-
-    def __init__(self, macdStrat):
-        self.macdStrat = macdStrat
-
-
-class AITradingStrat:
-    num = 3
-
-    def __init__(self, SB: StrategyBase):
-        self.SB = SB
-
-
-class TradeInstance:
-    def __init__(self, start, end, interval, startCapital, monthlyInvesting, index):
-        self.start = start
-        self.end = end
-        self.interval = interval
-        self.startCapital = startCapital
-        self.monthlyInvesting = monthlyInvesting
-        self.index = index
-        self.endValueTrade = 0
-        self.endValueHold = 0
-        self.shares_hold = None
-        self.priceDataTrade = []
-        self.priceDataHold = []
-        self.priceSeries = []
-        self.buyData = []
-        self.sellData = []
-
-    def buyShares(
-        self,
-        value,
-        tickerValue,
-    ) -> float:
-        return value / tickerValue
-
-    def reset(self):
-        self.endValueTrade = 0
-        self.endValueHold = 0
-        self.shares_hold = None
-        self.priceDataTrade.clear()
-        self.priceDataHold.clear()
-        self.priceSeries.clear()
-        self.buyData.clear()
-        self.sellData.clear()
+import menu as m
+from trading_models import (
+    StrategyBase,
+    RSITradeStrat,
+    MACDTradeStrat,
+    AITradingStrat,
+    TradeInstance,
+)
+import loading as load
 
 
 def main(TI: TradeInstance, tradingStrat, td):
@@ -311,35 +244,68 @@ if __name__ == "__main__":
     percent_trade = []
     percent_hold = []
 
-    index_tickers = [
-        "AMD",
-    ]
-    prompt = input("Enter your trading strategy description:")
-    code = AI.generateTradingStrat(prompt)
-    strategy: StrategyBase = AI.load_strategy_from_code(code)
-    startCapital = 0
-    monthlyInvesting = 100
-    startDate = "2020-10-10"
-    endDate = "2025-12-16"
-    interval = "1D"
-    ticker = "AMD"
-    tradeInstance = TradeInstance(
-        startDate, endDate, interval, startCapital, monthlyInvesting, ticker
-    )
-    tradeStrat = AITradingStrat(strategy)
-    td = getHistoData(startDate, endDate, ticker, interval)
-    main(tradeInstance, tradeStrat, td)
-    n_months = count_months(startDate, endDate)
-    total_contrib = startCapital + n_months * monthlyInvesting
-    percent_trade.append(
-        round(((tradeInstance.endValueTrade / total_contrib) * 100), 2)
-    )
-    percent_hold.append(round(((tradeInstance.endValueHold / total_contrib) * 100), 2))
-    graphs.graphPrice(tradeInstance)
+    choice = m.run_menu()
+
+    print(f"You selected: {choice}")
+
+    if choice == 3:
+        sys.exit()
+    elif choice == 0:
+        data = m.RSIStratMenu()
+        ti: TradeInstance = data[0]
+        ts: RSITradeStrat = data[1]
+    elif choice == 1:
+        data = m.macdMenu()
+        ti: TradeInstance = data[0]
+        ts: MACDTradeStrat = data[1]
+    elif choice == 2:
+        data = m.AIprompt()
+        ti: TradeInstance = data[0]
+        ts: AITradingStrat = data[1]
+
+    load_event, load_thread = load.start_spinner_sim()
+    td = getHistoData(ti.startDate, ti.endDate, ti.ticker, ti.interval)
+    main(ti, ts, td)
+    load.stop_spinner(load_event, load_thread)
+    print("Simulation Complete")
+    n_months = count_months(ti.startDate, ti.endDate)
+    total_contrib = ti.startCapital + n_months * ti.monthlyInvesting
+    percent_trade.append(round(((ti.endValueTrade / total_contrib) * 100), 2))
+    percent_hold.append(round(((ti.endValueHold / total_contrib) * 100), 2))
+    graphs.graphPrice(ti)
     print(
-        f"Average gain for trading strategy: {average(percent_trade)} \nAverage capital gain for holding: {average(percent_hold)}"
+        f"Average gain for trading strategy: {average(percent_trade)}% \nAverage capital gain for holding: {average(percent_hold)}%"
     )
 
+    # index_tickers = [
+    #     "AMD",
+    # ]
+    # prompt = input("Enter your trading strategy description:")
+    # code = AI.generateTradingStrat(prompt)
+    # strategy: StrategyBase = AI.load_strategy_from_code(code)
+    # startCapital = 0
+    # monthlyInvesting = 100
+    # startDate = "2020-10-10"
+    # endDate = "2025-12-16"
+    # interval = "1D"
+    # ticker = "AMD"
+    # tradeInstance = TradeInstance(
+    #     startDate, endDate, interval, startCapital, monthlyInvesting, ticker
+    # )
+    # tradeStrat = AITradingStrat(strategy)
+    # td = getHistoData(startDate, endDate, ticker, interval)
+    # main(tradeInstance, tradeStrat, td)
+    # n_months = count_months(startDate, endDate)
+    # total_contrib = startCapital + n_months * monthlyInvesting
+    # percent_trade.append(
+    #     round(((tradeInstance.endValueTrade / total_contrib) * 100), 2)
+    # )
+    # percent_hold.append(round(((tradeInstance.endValueHold / total_contrib) * 100), 2))
+    # graphs.graphPrice(tradeInstance)
+    # print(
+    #     f"Average gain for trading strategy: {average(percent_trade)} \nAverage capital gain for holding: {average(percent_hold)}"
+    # )
+    # ------------------------------------------------------------
     # for ticker in index_tickers:
     #     startCapital = 0
     #     monthlyInvesting = 100

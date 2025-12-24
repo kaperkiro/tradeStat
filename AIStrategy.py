@@ -2,28 +2,10 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 from pathlib import Path
-from main import StrategyBase
+from trading_models import StrategyBase
 import subprocess
 import sys
-import time
-import threading
-
-
-def thinking_spinner(message: str, stop_event: threading.Event):
-    dots = ["", ".", "..", "..."]
-    max_len = len(message) + len("...")
-
-    i = 0
-    while not stop_event.is_set():
-        text = f"{message}{dots[i % len(dots)]}"
-        sys.stdout.write("\r" + text.ljust(max_len))
-        sys.stdout.flush()
-        time.sleep(0.4)
-        i += 1
-
-    # Clear line on exit
-    sys.stdout.write("\r" + " " * max_len + "\r")
-    sys.stdout.flush()
+import loading as load
 
 
 def get_installed_packages() -> str:
@@ -74,15 +56,8 @@ def generateTradingStrat(prompt: str) -> str:
     client = OpenAI(api_key=openAI_key)
     pkgs = get_installed_packages()
 
-    # --- loading setup ---
-    stop_event = threading.Event()
-    spinner_thread = threading.Thread(
-        target=thinking_spinner,
-        args=("Generating Strategy", stop_event),
-        daemon=True,
-    )
-    spinner_thread.start()
-    # ---------------------
+    # start spinner
+    load_event, load_thread = load.start_spinnerAI()
 
     try:
         instr_outline = f"""
@@ -172,8 +147,8 @@ def generateTradingStrat(prompt: str) -> str:
             input=full_prompt,
         )
     finally:
-        stop_event.set()
-        spinner_thread.join()
+        # stop spinner
+        load.stop_spinner(load_event, load_thread)
 
     # Combine all text output (responses API returns objects, not dicts)
     # Prefer the aggregate output_text helper if present.

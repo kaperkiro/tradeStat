@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
+from matplotlib.ticker import StrMethodFormatter
 import pandas as pd
-from main import TradeInstance
+from trading_models import TradeInstance
 
 
 # functions for graphing of prices, trends etc
@@ -56,13 +57,17 @@ def graphPrice(TI: TradeInstance):
 
     ax1.plot(trade_df["Date"], trade_df["TradeValue"], label="Trading Strategy")
     ax1.set_ylabel("Portfolio Value")
+    ax1.yaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
     ax1.grid(True)
+
     ax1.legend()
 
     ax2.plot(hold_df["Date"], hold_df["HoldValue"], color="orange", label="Buy & Hold")
     ax2.set_ylabel("Portfolio Value")
+    ax2.yaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
     ax2.grid(True)
     ax2.legend()
+
     ax1.set_ylim(y_min, y_max)
     ax2.set_ylim(y_min, y_max)
 

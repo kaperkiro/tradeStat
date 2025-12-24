@@ -5,7 +5,9 @@ import yfinance as yf  # price downloader
 
 def load_prices_and_log_ret(ticker: str, start="2000-01-01"):
     """Download OHLCV history and compute daily log returns."""
-    df = yf.download(ticker, start, interval="1D", auto_adjust=False, progress=False)  # fetch history
+    df = yf.download(
+        ticker, start, interval="1D", auto_adjust=False, progress=False
+    )  # fetch history
     close = df["Close"]  # take the close column
     print(df)  # quick peek at the downloaded frame
     # yfinance may return a single-column DataFrame when columns are multi-indexed.
@@ -26,7 +28,9 @@ def label_vol_regimes(log_ret, vol_window, n_regimes):
     # pdcut split volatility into equal buckets, in our case 3,
     # 0(low volatility), 1(medium vol) and 2(high vol)
     regime = pd.qcut(valid, q=n_regimes, labels=False)  # quantile-based labels
-    out = pd.DataFrame({"r": aligned_ret, "vol": valid, "regime": regime.astype(int)})  # combined frame
+    out = pd.DataFrame(
+        {"r": aligned_ret, "vol": valid, "regime": regime.astype(int)}
+    )  # combined frame
     return out  # returns + vol + regime label
 
 
@@ -39,7 +43,9 @@ def estimate_transition_matrix(regimes: pd.Series, n_regimes: int):
         counts[r[t - 1], r[t]] += 1  # count transitions i->j
 
     row_sums = counts.sum(axis=1, keepdims=True)  # outgoing totals
-    P = np.divide(counts, row_sums, out=np.zeros_like(counts), where=row_sums > 0)  # normalize to probabilities
+    P = np.divide(
+        counts, row_sums, out=np.zeros_like(counts), where=row_sums > 0
+    )  # normalize to probabilities
 
     # if no regimes found, fallback to 1
     for i in range(n_regimes):
@@ -127,21 +133,35 @@ def simulate_regime_block_bootstrap_ohlc(
     seed: int = 0,
     start_date: str = "2025-12-18",
 ):
-    close_hist, log_ret = load_prices_and_log_ret(ticker, start=history_start)  # get history + log returns
+    close_hist, log_ret = load_prices_and_log_ret(
+        ticker, start=history_start
+    )  # get history + log returns
 
-    df_reg = label_vol_regimes(log_ret, vol_window=vol_window, n_regimes=n_regimes)  # tag regimes
-    P = estimate_transition_matrix(df_reg["regime"], n_regimes=n_regimes)  # regime transition probabilities
-    pools = build_regime_return_pools(df_reg, n_regimes=n_regimes)  # returns bucketed by regime
+    df_reg = label_vol_regimes(
+        log_ret, vol_window=vol_window, n_regimes=n_regimes
+    )  # tag regimes
+    P = estimate_transition_matrix(
+        df_reg["regime"], n_regimes=n_regimes
+    )  # regime transition probabilities
+    pools = build_regime_return_pools(
+        df_reg, n_regimes=n_regimes
+    )  # returns bucketed by regime
 
     n_steps = 252 * years  # number of trading days to simulate
     start_regime = int(df_reg["regime"].iloc[-1])  # start from last observed regime
 
     regime_path = simulate_regime_path(
-        P, n_steps=n_steps, start_regime=start_regime, seed=seed  # simulate regime sequence
+        P,
+        n_steps=n_steps,
+        start_regime=start_regime,
+        seed=seed,  # simulate regime sequence
     )
 
     sim_r = sample_returns_regime_blocks(
-        regime_path, pools, block_size=block_size, seed=seed + 1  # bootstrap returns respecting regimes
+        regime_path,
+        pools,
+        block_size=block_size,
+        seed=seed + 1,  # bootstrap returns respecting regimes
     )
 
     S0 = float(close_hist.iloc[-1])  # last historical close as starting price
