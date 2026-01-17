@@ -1,6 +1,7 @@
 import curses  ## standard on mac, on windows pip install windows-curses
 from datetime import datetime
 import AIStrategy as AI
+import textwrap
 from trading_models import (
     StrategyBase,
     RSITradeStrat,
@@ -14,6 +15,7 @@ OPTIONS = [
     "Run RSI trading strategy",
     "Run MACD trading strategy",
     "(new)Create your own trading strategy with AI",
+    "Run Monte-Carlo simulation",
     "Let AI control your portfolio (coming soon)",
     "Quit",
 ]
@@ -74,33 +76,100 @@ def _validate_date(s: str) -> bool:
         return False
 
 
+def _wrap_lines(text: str, width: int):
+    """Return a list of wrapped lines (at least 1), width >= 1."""
+    width = max(1, width)
+    # keep newlines the user might have
+    parts = text.splitlines() or [""]
+    out = []
+    for p in parts:
+        wrapped = textwrap.wrap(
+            p,
+            width=width,
+            replace_whitespace=False,
+            drop_whitespace=False,
+            break_long_words=True,
+        )
+        out.extend(wrapped if wrapped else [""])
+    return out
+
+
+def _safe_addstr(stdscr, y: int, x: int, s: str):
+    """Add string without throwing if it would go out of bounds."""
+    h, w = stdscr.getmaxyx()
+    if y < 0 or y >= h:
+        return
+    if x < 0 or x >= w:
+        return
+    # clip to remaining width
+    stdscr.addnstr(y, x, s, max(0, w - x - 1))
+
+
 def _draw_form(stdscr, title: str, fields, active_idx: int, message: str = ""):
     stdscr.clear()
-    stdscr.addstr(0, 0, title + "\n")
-    stdscr.addstr(1, 0, "-" * 72)
+    h, w = stdscr.getmaxyx()
+
+    _safe_addstr(stdscr, 0, 0, title)
+    _safe_addstr(stdscr, 1, 0, "-" * min(72, w - 1))
 
     row = 3
     for i, f in enumerate(fields):
         prefix = "> " if i == active_idx else "  "
-        stdscr.addstr(row, 0, f"{prefix}{f['label']}: {f['value']}")
-        row += 1
+        line = f"{prefix}{f['label']}: {f['value']}"
 
-    stdscr.addstr(
-        row + 1, 0, "Controls: ↑/↓ move, Enter edit/select, R run/confirm, Esc cancel"
-    )
+        # Wrap to screen width
+        wrapped = _wrap_lines(line, width=max(1, w - 1))
+
+        # Draw each wrapped line
+        for j, part in enumerate(wrapped):
+            _safe_addstr(stdscr, row + j, 0, part)
+
+        # Move row down by however many lines we used
+        row += len(wrapped)
+
+    controls = "Controls: ↑/↓ move, E edit/select, Enter run/confirm, Esc cancel"
+    _safe_addstr(stdscr, row + 1, 0, controls)
+
     if message:
-        stdscr.addstr(row + 3, 0, message)
+        for k, part in enumerate(_wrap_lines(message, width=max(1, w - 1))):
+            _safe_addstr(stdscr, row + 3 + k, 0, part)
+
     stdscr.refresh()
 
 
 def _edit_text(stdscr, prompt: str, initial: str = "") -> str:
     curses.echo()
     stdscr.clear()
-    stdscr.addstr(0, 0, prompt)
-    stdscr.addstr(2, 0, f"Current: {initial}")
-    stdscr.addstr(4, 0, "New: ")
+
+    h, w = stdscr.getmaxyx()
+    width = max(1, w - 1)
+
+    # Title
+    _safe_addstr(stdscr, 0, 0, prompt)
+
+    # Wrap "Current:" so it doesn't overwrite lines below
+    cur_lines = _wrap_lines(f"Current: {initial}", width=width)
+
+    y = 2
+    for line in cur_lines:
+        if y >= h - 2:
+            break
+        _safe_addstr(stdscr, y, 0, line)
+        y += 1
+
+    # Put "New:" after the wrapped current text
+    new_y = y + 1
+    if new_y >= h:
+        new_y = h - 1
+
+    _safe_addstr(stdscr, new_y, 0, "New: ")
+    stdscr.clrtoeol()
     stdscr.refresh()
-    s = stdscr.getstr(4, 5, 1000).decode("utf-8").strip()
+
+    # Read input on the same row as "New: "
+    # (No practical max: just use a large cap; curses requires a number.)
+    s = stdscr.getstr(new_y, 5, 32767).decode("utf-8", errors="ignore").strip()
+
     curses.noecho()
     return s if s else initial
 
@@ -127,7 +196,7 @@ def _select_from_list(stdscr, title: str, options, start_idx: int = 0):
         elif key in (curses.KEY_ENTER, 10, 13):
             return options[idx]
         elif key in (27, ord("q")):
-            return None
+            return -1
 
 
 # ----------------------------
@@ -203,7 +272,7 @@ def stock_info_form(stdscr, defaults=None):
         elif key in (curses.KEY_DOWN, ord("j")):
             idx = (idx + 1) % len(fields)
 
-        elif key in (curses.KEY_ENTER, 10, 13):
+        elif key in (ord("e"), ord("E")):
             f = fields[idx]
             if f["type"] == "select":
                 start_idx = (
@@ -219,7 +288,7 @@ def stock_info_form(stdscr, defaults=None):
                     stdscr, f"Edit {f['label']} (leave blank to keep):", str(f["value"])
                 )
 
-        elif key in (ord("r"), ord("R")):
+        elif key in (curses.KEY_ENTER, 10, 13):
             data = {f["key"]: str(f["value"]).strip() for f in fields}
 
             if not data["ticker"]:
@@ -248,7 +317,7 @@ def stock_info_form(stdscr, defaults=None):
             }
 
         elif key in (27, ord("q")):
-            return None
+            return -1
 
 
 # ----------------------------
@@ -293,13 +362,13 @@ def rsi_bounds_form(stdscr, defaults=None):
         elif key in (curses.KEY_DOWN, ord("j")):
             idx = (idx + 1) % len(fields)
 
-        elif key in (curses.KEY_ENTER, 10, 13):
+        elif key in (ord("e"), ord("E")):
             f = fields[idx]
             f["value"] = _edit_text(
                 stdscr, f"Edit {f['label']} (leave blank to keep):", str(f["value"])
             )
 
-        elif key in (ord("r"), ord("R")):
+        elif key in (curses.KEY_ENTER, 10, 13):
             data = {f["key"]: f["value"] for f in fields}
             lower = _safe_int(data["lower"])
             upper = _safe_int(data["upper"])
@@ -314,7 +383,7 @@ def rsi_bounds_form(stdscr, defaults=None):
             return {"lower": lower, "upper": upper}
 
         elif key in (27, ord("q")):
-            return None
+            return -1
 
 
 # ----------------------------
@@ -324,7 +393,7 @@ def macd_bounds_form(stdscr, defaults=None):
     """
     Returns int or None (cancel):
     macdStrat: int
-    Confirm with R/r.
+    Confirm with Enter.
     """
     defaults = defaults or {}
     fields = [
@@ -359,11 +428,11 @@ def macd_bounds_form(stdscr, defaults=None):
         elif key in (curses.KEY_DOWN, ord("j")):
             idx = (idx + 1) % len(fields)
 
-        elif key in (ord("r"), ord("R")):
+        elif key in (curses.KEY_ENTER, 10, 13):
             return fields[idx]["value"]
 
         elif key in (27, ord("q")):
-            return None
+            return -1
 
 
 # ----------------------------
@@ -373,7 +442,7 @@ def AI_prompt_form(stdscr, defaults=None):
     """
     Returns str or None (cancel):
     prompt: str
-    Confirm with R/r.
+    Confirm with Enter.
     """
     defaults = defaults or {}
     fields = [
@@ -402,17 +471,17 @@ def AI_prompt_form(stdscr, defaults=None):
         elif key in (curses.KEY_DOWN, ord("j")):
             idx = (idx + 1) % len(fields)
 
-        elif key in (curses.KEY_ENTER, 10, 13):
+        elif key in (ord("e"), ord("E")):
             f = fields[idx]
             f["value"] = _edit_text(
                 stdscr, f"Edit {f['label']} (leave blank to keep):", str(f["value"])
             )
 
-        elif key in (ord("r"), ord("R")):
+        elif key in (curses.KEY_ENTER, 10, 13):
             return fields[idx]["value"]
 
         elif key in (27, ord("q")):
-            return None
+            return -1
 
 
 # ----------------------------
@@ -420,13 +489,11 @@ def AI_prompt_form(stdscr, defaults=None):
 # ----------------------------
 def get_stock_info(defaults=None):
     result = curses.wrapper(stock_info_form, defaults)
-    print()  # nice cursor placement after curses
     return result
 
 
 def get_rsi_bounds(defaults=None):
     result = curses.wrapper(rsi_bounds_form, defaults)
-    print()
     return result
 
 
@@ -444,13 +511,15 @@ def get_AI_prompt(defaults=None):
 # Example: your RSIStratMenu
 # ----------------------------
 def RSIStratMenu():
-    stock = get_stock_info()
-    if stock is None:
-        return None
+    while True:
+        stock = get_stock_info()
+        if stock == -1:
+            return -1
 
-    rsi = get_rsi_bounds()
-    if rsi is None:
-        return None
+        rsi = get_rsi_bounds()
+        if rsi == -1:
+            continue
+        break
 
     TI = TradeInstance(
         stock["ticker"],
@@ -465,13 +534,16 @@ def RSIStratMenu():
 
 
 def macdMenu():
-    stock = get_stock_info()
-    if stock is None:
-        return None
 
-    macd = get_macd_bounds()
-    if macd is None:
-        return None
+    while True:
+        stock = get_stock_info()
+        if stock == -1:
+            return stock
+
+        macd = get_macd_bounds()
+        if macd == -1:
+            continue
+        break
 
     TI = TradeInstance(
         stock["ticker"],
@@ -487,12 +559,14 @@ def macdMenu():
 
 
 def AIprompt():
-    stock = get_stock_info()
-    if stock is None:
-        return None
-    prompt = get_AI_prompt()
-    if prompt is None:
-        return None
+    while True:
+        stock = get_stock_info()
+        if stock == -1:
+            return -1
+        prompt = get_AI_prompt()
+        if prompt == -1:
+            continue
+        break
 
     TI = TradeInstance(
         stock["ticker"],
@@ -508,3 +582,10 @@ def AIprompt():
     AS = AITradingStrat(strategy)
 
     return [TI, AS]
+
+
+def MonteCarloMenu():
+    # ask user for num of iterations
+    # select the usual getStockInfo
+
+    pass

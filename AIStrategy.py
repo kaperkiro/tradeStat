@@ -192,3 +192,50 @@ def load_strategy_from_code(code: str):
     save_strategy(code, "test1")
 
     return strategy
+
+
+def daily_prompt(
+    price,
+    rsi,
+    macd,
+    signal,
+    hist,
+) -> str:
+    client = OpenAI(api_key=openAI_key)
+
+    # start spinner
+    load_event, load_thread = load.start_spinnerAI()
+    prompt = """
+        You are a rule-based trading decision engine. You must decide one action for THIS candle only using ONLY the technical inputs provided below.
+        Do not use news, fundamentals, macro, sentiment, or any outside knowledge. Do not assume any missing information. If a value is missing or NaN, choose HOLD.
+
+        Your output MUST be exactly one of these tokens (uppercase) and nothing else:
+        BUY
+        SELL
+        HOLD
+
+        Goal: trade with trend confirmation and avoid overtrading.
+        - Prefer BUY when momentum turns bullish and is confirmed.
+        - Prefer SELL when momentum turns bearish and is confirmed.
+        - Otherwise HOLD.
+
+        Technical inputs for the current candle:
+        Close: {close}
+        MACD: {macd}
+        MACD_signal: {signal}
+        MACD_hist: {hist}
+        RSI14: {rsi}
+
+        decide what strategy to use to maximize the profit. The strategy are mostly for longer term swing trades. But can also be shorter if you fint it more suitable
+        
+        Important:
+        - You are NOT given position state (whether we already hold shares). Still output the best action based on the rules.
+        - Output ONLY: BUY, SELL, or HOLD.
+    """
+
+    resp = client.responses.create(
+        model="gpt-5-nano",
+        input=prompt,
+    )
+
+    return resp

@@ -40,6 +40,13 @@ class AITradingStrat:
         self.SB = SB
 
 
+class AIDailyStrat:
+    num = 4
+
+    def __init(self, risk_level):
+        self.risk_level = risk_level
+
+
 class TradeInstance:
     def __init__(self, ticker, start, end, interval, startCapital, monthlyInvesting):
         # Store with both legacy and current attribute names to avoid breakage.

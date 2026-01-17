@@ -4,7 +4,8 @@ import pandas as pd
 import yfinance as yf
 import indicators
 import macd_functions as mf
-
+import loading as load
+import AIStrategy as AI
 import menu as m
 from trading_models import (
     StrategyBase,
@@ -13,7 +14,6 @@ from trading_models import (
     AITradingStrat,
     TradeInstance,
 )
-import loading as load
 
 
 def main(TI: TradeInstance, tradingStrat, td):
@@ -29,10 +29,13 @@ def main(TI: TradeInstance, tradingStrat, td):
         td = indicators.calculate_macd(td)
         tradeMACDStrategy(TI, tradingStrat, td)
     elif tradingStrat.num == 3:
-        print("got into tradeAI")
         td = indicators.calculateRsi(td)
         td = indicators.calculate_macd(td)
         tradeAIStrategy(TI, tradingStrat.SB, td)
+    elif tradingStrat.num == 4:
+        td = indicators.calculateRsi(td)
+        td = indicators.calculate_macd(td)
+        tradeAIDailyStrat(TI, td)
 
     return
 
@@ -217,6 +220,35 @@ def tradeRsiStrategy(TI, tradingStrat, td=None):
     return
 
 
+def tradeAIDailyStrat(TI, td):
+    cash = TI.startCapital
+    shares = 0.0
+    td = td.copy() if td is not None else None
+    td = td.sort_index()
+
+    for ts, interval in td.iterrows():
+        price = interval["Close"]
+        macd = interval.get("MACD")
+        signal = interval.get("MACD_signal")
+        hist = interval.get("MACD_hist")
+        rsi = interval.get("RSI14")
+        response = AI.daily_prompt()
+        if response == "BUY":
+            equity = cash + shares * price
+            shares = TI.buyShares(equity, price)
+            cash = 0
+            TI.buyData.append((ts, price))
+        elif response == "SELL":
+            cash += shares * price
+            shares = 0
+            TI.sellData.append((ts, price))
+        equity = cash + shares * price
+    TI.priceDataTrade.append((ts, equity))
+    TI.endValueTrade = equity
+
+    return
+
+
 def getHistoData(startDate, endDate, ticker, interval):
     """
     Fetch price history.
@@ -244,24 +276,32 @@ if __name__ == "__main__":
     percent_trade = []
     percent_hold = []
 
-    choice = m.run_menu()
+    while True:
+        choice = m.run_menu()
 
-    print(f"You selected: {choice}")
-
-    if choice == 3:
-        sys.exit()
-    elif choice == 0:
-        data = m.RSIStratMenu()
-        ti: TradeInstance = data[0]
-        ts: RSITradeStrat = data[1]
-    elif choice == 1:
-        data = m.macdMenu()
-        ti: TradeInstance = data[0]
-        ts: MACDTradeStrat = data[1]
-    elif choice == 2:
-        data = m.AIprompt()
-        ti: TradeInstance = data[0]
-        ts: AITradingStrat = data[1]
+        if choice == -1 or choice == 5:
+            sys.exit()
+        elif choice == 0:
+            data = m.RSIStratMenu()
+            if data == -1:
+                continue
+            ti: TradeInstance = data[0]
+            ts: RSITradeStrat = data[1]
+        elif choice == 1:
+            data = m.macdMenu()
+            if data == -1:
+                continue
+            ti: TradeInstance = data[0]
+            ts: MACDTradeStrat = data[1]
+        elif choice == 2:
+            data = m.AIprompt()
+            if data == -1:
+                continue
+            ti: TradeInstance = data[0]
+            ts: AITradingStrat = data[1]
+        elif choice == 3:
+            data = m.MonteCarloMenu()
+        break
 
     load_event, load_thread = load.start_spinner_sim()
     td = getHistoData(ti.startDate, ti.endDate, ti.ticker, ti.interval)
